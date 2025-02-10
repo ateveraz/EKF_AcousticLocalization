@@ -1,0 +1,3 @@
+[submodule "ugv"]
+	path = ugv
+	url = https://github.com/ateveraz/ugv_simulator.git
