@@ -1,4 +1,4 @@
 [submodule "src/ugv"]
 	path = src/ugv
 	url = https://github.com/ateveraz/ugv_simulator.git
-	ignore = dirty
+	ignore = all
