@@ -3,10 +3,13 @@ from src.ugv.src.controller import Controller
 from src.ugv.src.simulator import Simulator
 from src.ugv.src.path_planning import PathPlanning
 
+from filterpy.stats import plot_covariance_ellipse
+from filterpy.kalman import UnscentedKalmanFilter, MerweScaledSigmaPoints
+
 from src.acoustic import CMusic
 from src.acoustic import Localization
 import numpy as np
-
+import matplotlib.pyplot as plt
 
 class PDController(Controller):
     def __init__(self):
@@ -60,13 +63,16 @@ class SourceLocalizationPlanning(PathPlanning):
         return robot_state[:2] + self.step_size * np.array([np.cos(angle) + np.sin(angle), np.sin(angle) - np.cos(angle)])
 
 class AcousticLocalization(Simulator):
-    def __init__(self, ugv, controller, path_planning, cmusic, localization):
+    def __init__(self, ugv, controller, path_planning, cmusic, localization, filter = None):
         """
         AcousticLocalization class constructor
         """
         super().__init__(ugv, controller, path_planning)
         self.cmusic = cmusic
         self.localization = localization
+
+        if filter is not None:
+            self.filter = filter
 
     def runCustom(self, time, show_animation = False):
         """
@@ -79,12 +85,28 @@ class AcousticLocalization(Simulator):
         self.t = np.zeros(num_steps)
 
         self.states[0] = self.ugv.state
+
+        self.first = True
+
+        if self.filter is not None:
+            self.filtered_position = np.zeros((num_steps, 2))
         
         for i in range(num_steps):
             # Acoustic localization
             measured_angle = self.cmusic.measure(self.ugv.state[:2])
             estimated_position = self.localization.localize(self.ugv.state, measured_angle)
-            print('Estimated position:', estimated_position, 'at time:', self.t[i])
+            #print('Estimated position:', estimated_position, 'at time:', self.t[i])
+
+            #Filtering if it is activated
+            if self.filter is not None:
+                if self.first:
+                    #print(np.shape(estimated_position))
+                    #print( self.filter.hx(self.ugv.state[:2]) )
+                    self.filter.set_initial_state(estimated_position)
+                    self.first = False
+                self.filter.predict()
+                self.filter.update(measured_angle)  #self.ugv.state[:2])
+                self.filtered_position[i] = self.filter.x
 
             # Path planning
             self.t[i] = i * self.ugv.params['dt']
@@ -99,16 +121,63 @@ class AcousticLocalization(Simulator):
         else:
             #self.plot()
             self.plotXY()
+            if filter is not None:
+                self.plotFilter()
+                # Mean of the last 10 estimated positions by filter
+                print('Mean of the last 10 estimated positions by filter:', np.mean(self.filtered_position[-10:], axis = 0))
 
         return self.t, self.states
-        
+
+    def plotFilter(self):
+        """
+        Plot the filtered position of the source. 
+        """
+        plt.figure()
+        plt.scatter(self.filtered_position[:, 0], self.filtered_position[:, 1])
+        plt.legend()
+        plt.show()
+
+class CustomUKF(UnscentedKalmanFilter):
+    def __init__(self, dim_x, dim_z, dt, process_noise, measurement_noise, initial_state):
+        """
+        CustomUKF class constructor
+        """
+        points = MerweScaledSigmaPoints(n = dim_x, alpha = 0.1, beta = 2., kappa = 1.) # kappa = 0 in the other code !
+        super().__init__(dim_x = dim_x, dim_z = dim_z, dt = dt, hx = self.hx, fx = self.fx, points = points)
+
+        self.x = initial_state
+        self.P = np.eye(dim_x) * 1000 # Check this value !
+        self.R = np.eye(dim_z) * measurement_noise
+        self.Q = np.eye(dim_x) * process_noise
+    
+    def set_initial_state(self, initial_state):
+        """
+        Set the initial state of the UKF
+        """
+        self.x = initial_state
+
+    def hx(self, z):
+        """
+        Measurement function
+
+        @param z: numpy vector containing the robot position. 
+        """
+        angle = np.arctan2(self.x[1] - z[1], self.x[0] - z[0])
+        return np.array([angle])
+
+    def fx(self, x, dt):
+        """
+        State transition function. 
+        Assumption: the speaker's position is static. 
+        """
+        return x
     
 # Instance CMusic
-source = np.array([-10, 10])
-cmusic = CMusic(source, noise = 1)
+source = np.array([-20, 20])
+cmusic = CMusic(source, noise = 0.1)
 
 # Instance UGV
-params = { 'dt': 0.01 }
+params = { 'dt': 0.1 }
 initial_state = np.array([-1, 1, 0])
 ugv = UGV(params, initial_state)
 
@@ -118,6 +187,17 @@ ctrl = PDController()
 # Instance Path Planning
 path_planning = SourceLocalizationPlanning(step_size = 5)
 
+# Localization algorithm
+loc = Localization(initial_state, 0)
+
+# Instance UKF
+measurement_noise = 0.1
+process_noise = 0.1
+dim_x = 2
+dim_z = 1
+
+ukf = CustomUKF(dim_x, dim_z, 0.1, process_noise, measurement_noise, np.array([0, 0]))
+
 # Instance Simulator
-sim = AcousticLocalization(ugv, ctrl, path_planning, cmusic, Localization(initial_state, 0))
-sim.runCustom(20, show_animation = True)
+sim = AcousticLocalization(ugv, ctrl, path_planning, cmusic, loc, filter = ukf)
+sim.runCustom(20, show_animation = False)
