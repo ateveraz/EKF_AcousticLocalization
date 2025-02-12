@@ -72,7 +72,10 @@ class AcousticLocalization(Simulator):
         self.localization = localization
 
         if filter is not None:
+            self.useFilter = True
             self.filter = filter
+        else:
+            self.useFilter = False
 
     def runCustom(self, time, show_animation = False):
         """
@@ -88,26 +91,36 @@ class AcousticLocalization(Simulator):
 
         self.first = True
 
-        if self.filter is not None:
+        self.estimated_positions = np.zeros((num_steps, 2))
+
+        if self.useFilter:
             self.filtered_position = np.zeros((num_steps, 2))
         
         for i in range(num_steps):
             # Acoustic localization
             measured_angle = self.cmusic.measure(self.ugv.state[:2])
             estimated_position = self.localization.localize(self.ugv.state, measured_angle)
+            self.estimated_positions[i] = estimated_position
             #print('Estimated position:', estimated_position, 'at time:', self.t[i])
 
-            #Filtering if it is activated
-            if self.filter is not None:
+            # Filtering if it is activated
+            if self.useFilter:
                 if self.first:
                     #print(np.shape(estimated_position))
                     #print( self.filter.hx(self.ugv.state[:2]) )
                     self.filter.set_initial_state(estimated_position)
                     self.first = False
                 self.filter.predict()
-                self.filter.update(measured_angle)  #self.ugv.state[:2])
-                self.filtered_position[i] = self.filter.x
-
+                self.filter.update(estimated_position)  #self.ugv.state[:2])
+                self.filtered_position[i,:] = self.filter.x.copy()
+                
+                nn = 5
+                if (i > nn):
+                    cov = np.std(self.filtered_position[i-nn:i,0]) + np.std(self.filtered_position[i-nn:i,1])
+                    if cov < 1.5:
+                        measured_angle = self.computeAngle(self.ugv.state[:2], self.filter.x)
+                        print('Estimated position by filter:', self.filter.x, 'at time:', self.t[i])  
+            
             # Path planning
             self.t[i] = i * self.ugv.params['dt']
             desired = self.path_planning.desired(self.ugv.state, measured_angle)
@@ -121,10 +134,11 @@ class AcousticLocalization(Simulator):
         else:
             #self.plot()
             self.plotXY()
-            if filter is not None:
+            if self.useFilter:
                 self.plotFilter()
                 # Mean of the last 10 estimated positions by filter
                 print('Mean of the last 10 estimated positions by filter:', np.mean(self.filtered_position[-10:], axis = 0))
+            print('Mean of the last 10 estimated positions:', np.mean(self.estimated_positions[-10:], axis = 0))
 
         return self.t, self.states
 
@@ -133,9 +147,16 @@ class AcousticLocalization(Simulator):
         Plot the filtered position of the source. 
         """
         plt.figure()
-        plt.scatter(self.filtered_position[:, 0], self.filtered_position[:, 1])
+        plt.scatter(self.estimated_positions[:, 0], self.estimated_positions[:, 1], label = 'Estimated position')
+        plt.scatter(self.filtered_position[:, 0], self.filtered_position[:, 1], label = 'Filtered position')
         plt.legend()
         plt.show()
+
+    def computeAngle(self, robot, source):
+        """
+        Compute the angle of arrival of the acoustic signal. 
+        """
+        return np.arctan2(source[1] - robot[1], source[0] - robot[0])
 
 class CustomUKF(UnscentedKalmanFilter):
     def __init__(self, dim_x, dim_z, dt, process_noise, measurement_noise, initial_state):
@@ -146,7 +167,7 @@ class CustomUKF(UnscentedKalmanFilter):
         super().__init__(dim_x = dim_x, dim_z = dim_z, dt = dt, hx = self.hx, fx = self.fx, points = points)
 
         self.x = initial_state
-        self.P = np.eye(dim_x) * 1000 # Check this value !
+        self.P = np.eye(dim_x) * 100 # Check this value !
         self.R = np.eye(dim_z) * measurement_noise
         self.Q = np.eye(dim_x) * process_noise
     
@@ -162,8 +183,9 @@ class CustomUKF(UnscentedKalmanFilter):
 
         @param z: numpy vector containing the robot position. 
         """
-        angle = np.arctan2(self.x[1] - z[1], self.x[0] - z[0])
-        return np.array([angle])
+        return z
+        #angle = np.arctan2(self.x[1] - z[1], self.x[0] - z[0])
+        #return np.array([angle])
 
     def fx(self, x, dt):
         """
@@ -173,8 +195,8 @@ class CustomUKF(UnscentedKalmanFilter):
         return x
     
 # Instance CMusic
-source = np.array([-20, 20])
-cmusic = CMusic(source, noise = 0.1)
+source = np.array([-25, 30])
+cmusic = CMusic(source, noise = 0.5 * 18 * (np.pi/180))
 
 # Instance UGV
 params = { 'dt': 0.1 }
@@ -189,15 +211,15 @@ path_planning = SourceLocalizationPlanning(step_size = 5)
 
 # Localization algorithm
 loc = Localization(initial_state, 0)
-
+loc = Localization(initial_state, 0)
 # Instance UKF
-measurement_noise = 0.1
-process_noise = 0.1
+measurement_noise = 10 * (np.pi/180)
+process_noise = 2 * (np.pi/180)
 dim_x = 2
-dim_z = 1
+dim_z = 2
 
 ukf = CustomUKF(dim_x, dim_z, 0.1, process_noise, measurement_noise, np.array([0, 0]))
 
 # Instance Simulator
-sim = AcousticLocalization(ugv, ctrl, path_planning, cmusic, loc, filter = ukf)
+sim = AcousticLocalization(ugv, ctrl, path_planning, cmusic, loc)#, filter = ukf)
 sim.runCustom(20, show_animation = False)
