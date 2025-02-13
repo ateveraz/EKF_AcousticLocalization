@@ -99,16 +99,16 @@ class AcousticLocalization(Simulator):
             self.ugv.update_state(control_input)
             self.states[i] = self.ugv.state
 
-        if show_animation:
-            self.animate()
-        else:
-            #self.plot()
-            self.plotXY()
-            if self.useFilter:
-                self.plotFilter()
-                # Mean of the last 10 estimated positions by filter
-                print('Mean of the last 10 estimated positions by filter:', np.mean(self.filtered_position[-10:], axis = 0))
-            print('Mean of the last 10 estimated positions:', np.mean(self.estimated_positions[-10:], axis = 0))
+        # if show_animation:
+        #     self.animate()
+        # else:
+        #     #self.plot()
+        #     self.plotXY()
+        if self.useFilter:
+            self.plotFilter() # todo: Add this function to analysis class.
+            # Mean of the last 10 estimated positions by filter
+            print('Mean of the last 10 estimated positions by filter:', np.mean(self.filtered_position[-10:], axis = 0))
+        print('Mean of the last 10 estimated positions:', np.mean(self.estimated_positions[-10:], axis = 0))
 
         return self.t, self.states
 

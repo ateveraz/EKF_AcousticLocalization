@@ -13,12 +13,11 @@ ukf = CustomUKF(params['dim_x'], params['dim_z'], params['dt'], params['process_
 
 # Instance Simulator 1
 sim1 = AcousticLocalization(params, debugging = False)
-sim1.runCustom(20, show_animation = False)
+sim1.runCustom(20)
 
 # Instance Simulator 2
 sim2 = AcousticLocalization(params, filter = ukf, debugging = False)
-sim2.runCustom(20, show_animation = False)
+sim2.runCustom(20)
 
 # Instance ResultsAnalysis
-data = results([sim1, sim2])
-data.plot_XY()
+data = results([sim1, sim2], show_animation = True)
