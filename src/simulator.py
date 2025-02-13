@@ -23,6 +23,8 @@ class AcousticLocalization(Simulator):
 
         self.cmusic = CMusic(params['source'], noise = params['noise'])
         self.localization = Localization(params['initial_state'])
+        
+        self.source_position = params['source']
 
         self.debugging = debugging
 
