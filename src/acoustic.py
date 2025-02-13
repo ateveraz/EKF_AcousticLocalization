@@ -24,7 +24,7 @@ class CMusic:
         return angle
 
 class Localization:
-    def __init__(self, init_robot_position, init_measured_angle):
+    def __init__(self, init_robot_position, init_measured_angle = 0):
         """
         Localization algorithm using triangulation. 
         """
